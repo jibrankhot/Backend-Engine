@@ -1,21 +1,38 @@
 import sql from "mssql";
-import { createClient } from "@supabase/supabase-js";
-import { ENV } from "../config/env";
-import { resolveDb } from "./resolver";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { SQL_CONFIG } from "../config/db";
+import { ENV } from "../config/env";
 
-// ---------- SQL POOL PER DATABASE ----------
+// ===============================
+// SQL POOL MANAGER (PER DATABASE)
+// ===============================
 
 const sqlPools: Record<string, sql.ConnectionPool> = {};
 
-// ---------- SUPABASE CLIENT ----------
+async function getSqlPool(dbName: string): Promise<sql.ConnectionPool> {
+    if (!sqlPools[dbName]) {
+        sqlPools[dbName] = await sql.connect({
+            ...SQL_CONFIG,
+            database: dbName,
+        });
+    }
+    return sqlPools[dbName];
+}
 
-const supabase = createClient(
-    ENV.db.supabase.url,
-    ENV.db.supabase.serviceKey
-);
+// ===============================
+// SUPABASE CLIENT FACTORY
+// ===============================
 
-// ---------- HELPERS ----------
+function getSupabaseClient(): SupabaseClient {
+    return createClient(
+        ENV.db.supabase.url,
+        ENV.db.supabase.serviceKey
+    );
+}
+
+// ===============================
+// PAYLOAD BUILDER (UNIVERSAL)
+// ===============================
 
 function buildPayload(payload: any) {
     return {
@@ -23,6 +40,10 @@ function buildPayload(payload: any) {
         FormObj: payload?.form || {},
     };
 }
+
+// ===============================
+// RESULT NORMALIZERS
+// ===============================
 
 function normalizeSqlResult(result: any) {
     const recordsets = Array.isArray(result?.recordsets)
@@ -50,23 +71,22 @@ function normalizeSupabaseResult(data: any, error?: any) {
     return {
         StatusCode: data?.StatusCode ?? 200,
         Message: data?.Message ?? "Success",
-        DataSet: data?.DataSet ?? [],
+        DataSet: data?.DataSet ?? data ?? [],
     };
 }
 
-// ---------- SQL SERVER EXECUTOR ----------
+// ===============================
+// SQL SERVER ADAPTER
+// ===============================
 
-async function runSqlServer(procedure: string, payload: any) {
-    const dbName = resolveDb(procedure);
+async function executeSqlProcedure(
+    dbName: string,
+    procedure: string,
+    payload: any
+) {
+    const pool = await getSqlPool(dbName);
+    const request = pool.request();
 
-    if (!sqlPools[dbName]) {
-        sqlPools[dbName] = await sql.connect({
-            ...SQL_CONFIG,
-            database: dbName,
-        });
-    }
-
-    const request = sqlPools[dbName].request();
     const { ParamObj, FormObj } = buildPayload(payload);
 
     request.input("ParamObj", sql.NVarChar(sql.MAX), JSON.stringify(ParamObj));
@@ -77,9 +97,15 @@ async function runSqlServer(procedure: string, payload: any) {
     return normalizeSqlResult(result);
 }
 
-// ---------- SUPABASE EXECUTOR (PROCEDURE STYLE) ----------
+// ===============================
+// SUPABASE ADAPTER (RPC STYLE)
+// ===============================
 
-async function runSupabase(procedure: string, payload: any) {
+async function executeSupabaseProcedure(
+    procedure: string,
+    payload: any
+) {
+    const supabase = getSupabaseClient();
     const { ParamObj, FormObj } = buildPayload(payload);
 
     const { data, error } = await supabase.rpc(procedure, {
@@ -90,16 +116,33 @@ async function runSupabase(procedure: string, payload: any) {
     return normalizeSupabaseResult(data, error);
 }
 
-// ---------- UNIVERSAL ENGINE FUNCTION ----------
+// ===============================
+// UNIVERSAL PROCEDURE ENGINE
+// ===============================
 
-export async function runProcedure(procedure: string, payload: any) {
-    if (ENV.db.primary === "sqlserver") {
-        return runSqlServer(procedure, payload);
+export async function runProcedure(options: {
+    dbType: "sql" | "supabase";
+    dbName?: string;
+    procedure: string;
+    payload: any;
+}) {
+    const { dbType, dbName, procedure, payload } = options;
+
+    if (!procedure) {
+        throw new Error("Procedure name is required");
     }
 
-    if (ENV.db.primary === "supabase") {
-        return runSupabase(procedure, payload);
-    }
+    switch (dbType) {
+        case "sql":
+            if (!dbName) {
+                throw new Error("Database name is required for SQL Server");
+            }
+            return executeSqlProcedure(dbName, procedure, payload);
 
-    throw new Error(`Unsupported DB type: ${ENV.db.primary}`);
+        case "supabase":
+            return executeSupabaseProcedure(procedure, payload);
+
+        default:
+            throw new Error(`Unsupported DB type: ${dbType}`);
+    }
 }

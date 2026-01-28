@@ -1,0 +1,5 @@
+{
+  "project": "school",
+  "masterDb": "school_setup",
+  "clientDb": "school_db"
+}

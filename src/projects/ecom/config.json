@@ -1,0 +1,5 @@
+{
+  "project": "ecom",
+  "masterDb": "ecom_setup",
+  "clientDb": "ecom_db"
+}
