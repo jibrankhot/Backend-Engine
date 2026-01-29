@@ -2,13 +2,13 @@ import fs from "fs";
 import path from "path";
 import { ENV } from "../config/env";
 
-export type DbType = "sql" | "supabase";
-
 export type ProjectConfig = {
     project: string;
-    dbType?: DbType;       // default: sql
-    masterDb?: string;     // only for SQL
-    clientDb?: string;     // only for SQL
+    masterDb?: string;     // SQL master DB
+    clientDb?: string;     // SQL client DB
+
+    // ⚠️ backward compatibility (ignored by engine)
+    dbType?: "sql" | "supabase";
 };
 
 const cache: Record<string, ProjectConfig> = {};
@@ -35,18 +35,18 @@ export function getContext(projectName?: string): ProjectConfig {
         throw new Error("Project name is not defined in ENV or request");
     }
 
+    // ✅ cached config
     if (!cache[project]) {
         const filePath = getProjectConfigPath(project);
         const raw = fs.readFileSync(filePath, "utf-8");
 
         const cfg = JSON.parse(raw) as ProjectConfig;
 
-        // Defaults (keep engine stable)
         cache[project] = {
             project: cfg.project || project,
-            dbType: cfg.dbType || "sql",
             masterDb: cfg.masterDb,
             clientDb: cfg.clientDb,
+            dbType: cfg.dbType, // kept only for compatibility (not used)
         };
     }
 

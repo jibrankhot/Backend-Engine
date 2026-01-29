@@ -2,19 +2,15 @@ import { getContext } from "./context";
 
 const MASTER_PREFIX = ["Admin_", "Setup_", "System_"];
 
-export type DbType = "sql" | "supabase";
-
 export interface ResolvedContext {
-    dbType: DbType;
-    dbName?: string;
+    project: string;
+    dbName?: string; // only for SQL
     procedure: string;
     payload: any;
-    project: string;
 }
 
 export function resolveContext(input: {
     project?: string;
-    db?: DbType;
     procedure: string;
     params?: any;
     form?: any;
@@ -28,24 +24,16 @@ export function resolveContext(input: {
         throw new Error("Procedure name is required");
     }
 
-    // 1️⃣ Decide DB Type (SQL / Supabase)
-    const dbType: DbType =
-        input.db ||
-        cfg.dbType ||
-        "sql"; // default = SQL
-
-    // 2️⃣ Decide DB Name (only for SQL)
+    // ✅ Decide DB Name (SQL only, engine will decide SQL/Supabase)
     let dbName: string | undefined;
 
-    if (dbType === "sql") {
-        const isMaster = MASTER_PREFIX.some(p =>
-            procedure.startsWith(p)
-        );
+    const isMaster = MASTER_PREFIX.some(p =>
+        procedure.startsWith(p)
+    );
 
-        dbName = isMaster ? cfg.masterDb : cfg.clientDb;
-    }
+    dbName = isMaster ? cfg.masterDb : cfg.clientDb;
 
-    // 3️⃣ Build Payload (keep Node thin)
+    // ✅ Build Payload (Node remains thin)
     const payload = {
         params: input.params || {},
         form: input.form || {},
@@ -53,7 +41,6 @@ export function resolveContext(input: {
 
     return {
         project,
-        dbType,
         dbName,
         procedure,
         payload,

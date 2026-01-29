@@ -4,7 +4,10 @@ export type ProcedurePayload = {
 };
 
 export interface EngineRequest {
+    project?: string;
     procedure: string;
+    params?: Record<string, any>;
+    form?: Record<string, any>;
     payload?: ProcedurePayload;
     meta?: {
         requestId?: string;
