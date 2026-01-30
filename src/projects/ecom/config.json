@@ -1,5 +1,13 @@
 {
   "project": "ecom",
   "masterDb": "ecom_setup",
-  "clientDb": "ecom_db"
+  "clientDb": "ecom_db",
+  "procedures": {
+    "allowed": [
+      "User_Login",
+      "User_Register",
+      "Get_Products",
+      "Order_Create"
+    ]
+  }
 }

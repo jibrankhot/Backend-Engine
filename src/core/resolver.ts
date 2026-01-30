@@ -1,20 +1,30 @@
-import { getContext } from "./context";
+/**
+ * This file resolves the execution context for each request.
+ * It determines the project, database name (for SQL), procedure, and payload
+ * before passing the request to the executor layer.
+ */
 
+import { getContext } from "./context";
+import { EngineRequest } from "./contract/request";
+
+
+/** Procedure prefixes that must use master database (SQL only) */
 const MASTER_PREFIX = ["Admin_", "Setup_", "System_"];
 
 export interface ResolvedContext {
     project: string;
-    dbName?: string; // only for SQL
+    dbName?: string; // used only for SQL Server
     procedure: string;
-    payload: any;
+    payload: {
+        params?: Record<string, any>;
+        data?: Record<string, any>;
+    };
 }
 
-export function resolveContext(input: {
-    project?: string;
-    procedure: string;
-    params?: any;
-    form?: any;
-}): ResolvedContext {
+/**
+ * Resolves project, database name, procedure, and payload from the request.
+ */
+export function resolveContext(input: EngineRequest): ResolvedContext {
     const cfg = getContext();
 
     const project = input.project || cfg.project || "default";
@@ -24,19 +34,19 @@ export function resolveContext(input: {
         throw new Error("Procedure name is required");
     }
 
-    // ✅ Decide DB Name (SQL only, engine will decide SQL/Supabase)
+    // Decide SQL database name (master or client DB)
     let dbName: string | undefined;
 
-    const isMaster = MASTER_PREFIX.some(p =>
-        procedure.startsWith(p)
+    const isMaster = MASTER_PREFIX.some(prefix =>
+        procedure.startsWith(prefix)
     );
 
     dbName = isMaster ? cfg.masterDb : cfg.clientDb;
 
-    // ✅ Build Payload (Node remains thin)
+    // Build normalized payload
     const payload = {
-        params: input.params || {},
-        form: input.form || {},
+        params: input.payload?.params || {},
+        data: input.payload?.data || {},
     };
 
     return {
