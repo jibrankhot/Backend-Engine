@@ -1,36 +1,39 @@
+/**
+ * This file defines API routes and connects HTTP requests to the engine.
+ * /health = service status
+ * /run = universal procedure execution endpoint
+ */
+
 import { Router } from "express";
-import { run } from "./core/run";
-import { EngineRequest } from "./core/request";
+import { runProcedure } from "./core/executor/hybrid.executor";
+import { validateRequest } from "./core/validation/validator";
+import { handleError } from "./core/errors/error.handler";
 
 const router = Router();
 
-// Health check
+/**
+ * Health check endpoint.
+ */
 router.get("/health", (_req, res) => {
     res.json({
         status: "ok",
         engine: "hybrid-db-engine",
+        timestamp: Date.now(),
     });
 });
 
-// Universal procedure executor
+/**
+ * Universal procedure executor endpoint.
+ */
 router.post("/run", async (req, res) => {
     try {
-        const body = req.body as EngineRequest;
+        const body = validateRequest(req.body);
 
-        const result = await run({
-            project: body.project || body.meta?.project,
-            procedure: body.procedure,
-            params: body.params || body.payload?.params,
-            form: body.form || body.payload?.form,
-        });
+        const result = await runProcedure(body);
 
         res.json(result);
     } catch (err: any) {
-        res.status(500).json({
-            StatusCode: 500,
-            Message: err.message,
-            DataSet: [],
-        });
+        res.status(500).json(handleError(err));
     }
 });
 
