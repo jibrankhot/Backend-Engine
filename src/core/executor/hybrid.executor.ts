@@ -47,6 +47,7 @@ export async function runProcedure(
             return res;
         }
 
+        /*
         if (cachedMode === "supabase") {
             const res = await runSupabaseProcedure(procedure, payload, project);
             logSuccess({
@@ -57,6 +58,7 @@ export async function runProcedure(
             });
             return res;
         }
+        */
 
         // 2) Try SQL first
         if (dbName) {
@@ -76,7 +78,8 @@ export async function runProcedure(
         logError({ project, procedure, db: "sql" }, err);
     }
 
-    // 3) Fallback to Supabase
+    // 3) Fallback to Supabase (TEMP DISABLED)
+    /*
     try {
         const res = await runSupabaseProcedure(procedure, payload, project);
         DB_CACHE[project] = "supabase";
@@ -93,4 +96,8 @@ export async function runProcedure(
         logError({ project, procedure, db: "supabase" }, err);
         throw err;
     }
+    */
+
+    // If SQL fails now → return actual SQL error
+    throw new Error("SQL execution failed and Supabase fallback is disabled.");
 }

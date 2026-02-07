@@ -19,11 +19,14 @@ const sqlPools: Record<string, sql.ConnectionPool> = {};
  */
 async function getSqlPool(dbName: string) {
     if (!sqlPools[dbName]) {
-        sqlPools[dbName] = await sql.connect({
+        const pool = new sql.ConnectionPool({
             ...SQL_CONFIG,
             database: dbName,
         });
+
+        sqlPools[dbName] = await pool.connect();
     }
+
     return sqlPools[dbName];
 }
 
@@ -33,7 +36,7 @@ async function getSqlPool(dbName: string) {
 function buildSqlPayload(payload: any) {
     return {
         ParamObj: payload?.params || {},
-        DataObj: payload?.data || {},
+        FormObj: payload?.data || {},
     };
 }
 
@@ -67,18 +70,25 @@ export async function runSqlProcedure(
     const pool = await getSqlPool(dbName);
     const request = pool.request();
 
-    const { ParamObj, DataObj } = buildSqlPayload(payload);
+    const { ParamObj, FormObj } = buildSqlPayload(payload);
 
+    // Send parameters EXACTLY as SQL proc expects
     request.input("ParamObj", sql.NVarChar(sql.MAX), JSON.stringify(ParamObj));
-    request.input("DataObj", sql.NVarChar(sql.MAX), JSON.stringify(DataObj));
+    request.input("FormObj", sql.NVarChar(sql.MAX), JSON.stringify(FormObj));
 
     const start = Date.now();
-    const result = await request.execute(procedure);
-    const durationMs = Date.now() - start;
 
-    return normalizeSqlResult(result, {
-        project,
-        db: "sql",
-        durationMs,
-    });
+    try {
+        const result = await request.execute(`dbo.${procedure}`);
+        const durationMs = Date.now() - start;
+
+        return normalizeSqlResult(result, {
+            project,
+            db: "sql",
+            durationMs,
+        });
+    } catch (err: any) {
+        console.error("SQL EXECUTION ERROR:", err);
+        throw err;
+    }
 }

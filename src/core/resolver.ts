@@ -7,9 +7,8 @@
 import { getContext } from "./context";
 import { EngineRequest } from "./contract/request";
 
-
-/** Procedure prefixes that must use master database (SQL only) */
-const MASTER_PREFIX = ["Admin_", "Setup_", "System_"];
+/** Procedure prefixes that must use master database (setup/auth/system DB) */
+const MASTER_PREFIX = ["Admin", "Auth", "Setup", "System"];
 
 export interface ResolvedContext {
     project: string;
@@ -41,6 +40,8 @@ export function resolveContext(input: EngineRequest): ResolvedContext {
         procedure.startsWith(prefix)
     );
 
+    // Admin/Auth/Setup/System → setup DB
+    // Everything else → client DB
     dbName = isMaster ? cfg.masterDb : cfg.clientDb;
 
     // Build normalized payload
@@ -48,6 +49,9 @@ export function resolveContext(input: EngineRequest): ResolvedContext {
         params: input.payload?.params || {},
         data: input.payload?.data || {},
     };
+
+    // Debug log (keep during development)
+    console.log("RESOLVER DB:", dbName, "PROC:", procedure);
 
     return {
         project,
