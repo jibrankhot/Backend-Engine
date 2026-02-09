@@ -1,4 +1,5 @@
-import { runProcedure } from "./executor";
+import { runProcedure } from "./executor/hybrid.executor";
+import { EngineRequest } from "./contract/request";
 
 export async function run(input: {
     project?: string;
@@ -6,5 +7,13 @@ export async function run(input: {
     params?: any;
     form?: any;
 }) {
-    return runProcedure(input);
+    const request: EngineRequest = {
+        project: input.project,
+        action: {
+            procedure: input.procedure,
+            params: input.params,
+            form: input.form
+        }
+    };
+    return runProcedure(request);
 }

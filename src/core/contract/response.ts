@@ -1,24 +1,94 @@
 /**
- * This file defines the standard response structure returned by the backend engine.
- * Every API call returns this format so clients can handle success, errors, and metadata consistently.
+ * ============================= UNIVERSAL RESPONSE CONTRACT =============================
+ *
+ * Ye backend engine ka OUTPUT STANDARD define karta hai.
+ *
+ * Flow:
+ *
+ * SQL Server
+ *     ↓
+ * SQL Executor
+ *     ↓
+ * Response Contract (ye file)
+ *     ↓
+ * Angular / Client
+ *
+ * Purpose:
+ * - Frontend ko SQL ka format samajhna na pade
+ * - Har project me same response structure rahe
+ * - Success / Error standard ho
+ * - Logging aur debugging easy ho
+ *
+ * Agar ye stable hai → frontend kabhi break nahi hoga.
+ *
+ * =============================================================================
  */
 
-export interface EngineResponse<T = any> {
-    /** Numeric status code returned by the engine */
-    statusCode: number;
 
-    /** Human-readable message describing the result */
+/* -------------------------------------------------------------------------- */
+/* STATUS OBJECT                                                              */
+/* -------------------------------------------------------------------------- */
+
+export interface ResponseStatus {
+    code: number;
+    success: boolean;
     message: string;
+}
 
-    /** Actual data returned from the database procedure */
-    data: T;
 
-    /** Engine metadata about the execution */
-    meta?: {
-        project?: string;
-        db?: "sql" | "supabase";
-        requestId?: string;
-        timestamp?: number;
-        durationMs?: number;
-    };
+/* -------------------------------------------------------------------------- */
+/* ERROR STRUCTURE                                                            */
+/* -------------------------------------------------------------------------- */
+
+export interface ResponseError {
+    code: string;
+    message: string;
+    details?: unknown;
+}
+
+
+/* -------------------------------------------------------------------------- */
+/* DATASET STRUCTURE                                                          */
+/* -------------------------------------------------------------------------- */
+
+export interface DataSet {
+    tables?: Record<string, unknown[]>;
+    data?: unknown;
+    output?: Record<string, unknown>;
+}
+
+
+/* -------------------------------------------------------------------------- */
+/* META INFORMATION                                                           */
+/* -------------------------------------------------------------------------- */
+
+export interface ResponseMeta {
+    requestId?: string;
+    timestamp?: number;
+    durationMs?: number;
+    db?: "sql" | "supabase";
+    companyDb?: string;
+    procedure?: string;
+}
+
+
+/* -------------------------------------------------------------------------- */
+/* MAIN RESPONSE OBJECT                                                       */
+/* -------------------------------------------------------------------------- */
+
+export interface EngineResponse<T = unknown> {
+
+    status: ResponseStatus;
+
+    data?: T | DataSet;
+
+    error?: ResponseError;
+
+    meta?: ResponseMeta;
+
+    /**
+     * OLD SUPPORT — existing frontend break nahi hoga
+     */
+    statusCode?: number;
+    message?: string;
 }

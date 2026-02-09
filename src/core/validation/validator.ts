@@ -1,28 +1,83 @@
 /**
- * This file validates incoming engine requests before execution.
+ * ============================= REQUEST VALIDATOR (NEW CONTRACT ONLY) =============================
+ *
+ * Ye validator sirf NEW request structure accept karega.
+ *
+ * Required format:
+ *
+ * {
+ *   action: {
+ *     procedure: "ProcName",
+ *     params: {},
+ *     form: {}
+ *   },
+ *   auth: {},
+ *   meta: {}
+ * }
+ *
+ * Old format (procedure top-level, payload) → reject hoga.
+ *
+ * Purpose:
+ * - engine ko clean rakhna
+ * - strict contract enforce karna
+ * - future bugs avoid karna
  */
 
 import { EngineRequest } from "../contract/request";
 
-/**
- * Validates the request structure.
- * Throws error if invalid.
- */
+
 export function validateRequest(body: any): EngineRequest {
+
     if (!body || typeof body !== "object") {
         throw new Error("Invalid request body");
     }
 
-    if (!body.procedure || typeof body.procedure !== "string") {
-        throw new Error("Procedure is required");
+    // -------------------------------
+    // ACTION REQUIRED
+    // -------------------------------
+
+    if (!body.action || typeof body.action !== "object") {
+        throw new Error("Action object is required");
     }
 
-    if (body.project && typeof body.project !== "string") {
-        throw new Error("Project must be a string");
+    // -------------------------------
+    // PROCEDURE REQUIRED
+    // -------------------------------
+
+    if (!body.action.procedure || typeof body.action.procedure !== "string") {
+        throw new Error("action.procedure is required");
     }
 
-    if (body.payload && typeof body.payload !== "object") {
-        throw new Error("Payload must be an object");
+    // -------------------------------
+    // PARAMS VALIDATION
+    // -------------------------------
+
+    if (body.action.params && typeof body.action.params !== "object") {
+        throw new Error("action.params must be an object");
+    }
+
+    // -------------------------------
+    // FORM VALIDATION
+    // -------------------------------
+
+    if (body.action.form && typeof body.action.form !== "object") {
+        throw new Error("action.form must be an object");
+    }
+
+    // -------------------------------
+    // AUTH VALIDATION
+    // -------------------------------
+
+    if (body.auth && typeof body.auth !== "object") {
+        throw new Error("auth must be an object");
+    }
+
+    // -------------------------------
+    // META VALIDATION
+    // -------------------------------
+
+    if (body.meta && typeof body.meta !== "object") {
+        throw new Error("meta must be an object");
     }
 
     return body as EngineRequest;

@@ -1,12 +1,49 @@
 /**
- * This file executes SQL Server procedures.
- * It manages SQL connection pools, sends payload to procedures,
- * and normalizes SQL results into the engine response format.
+ * ============================= SQL EXECUTOR (CORE ENGINE) =============================
+ *
+ * Ye backend engine ka SABSE IMPORTANT file hai.
+ * Yahin se actual database execution hota hai.
+ *
+ * Backend flow samjho:
+ *
+ * Angular / Client
+ *        ↓
+ * API Route (/api/run)
+ *        ↓
+ * DB Resolver (decides DB)
+ *        ↓
+ * SQL Executor (THIS FILE)
+ *        ↓
+ * Stored Procedure (SQL Server)
+ *        ↓
+ * Response normalize karke client ko wapas
+ *
+ *
+ * Ye file kya handle karti hai:
+ *
+ * 1) SQL connection pooling (per database)
+ * 2) Stored procedure execution
+ * 3) ParamObj / FormObj SQL ko bhejna
+ * 4) SQL recordsets ko normalize karna
+ * 5) Execution time measure karna
+ * 6) SQL errors ko safe response me convert karna
+ * 7) Universal response contract follow karna
+ *
+ *
+ * IMPORTANT:
+ * - Yahan koi business logic nahi hota
+ * - Sirf transport + execution layer hai
+ * - Reusable across ALL projects
+ *
+ * Agar ye file strong hai → poora backend reusable engine ban jata hai.
+ *
+ * =============================================================================
  */
 
 import sql from "mssql";
 import { SQL_CONFIG } from "../../config/db";
-import { EngineResponse } from "../contract/response";
+import { EngineResponse, ResponseMeta, DataSet } from "../contract/response";
+
 
 // ===============================
 // SQL POOL CACHE (per database)
@@ -15,7 +52,8 @@ import { EngineResponse } from "../contract/response";
 const sqlPools: Record<string, sql.ConnectionPool> = {};
 
 /**
- * Returns a cached SQL connection pool for a database.
+ * Har database ke liye ek hi connection pool banega.
+ * Performance improve hoti hai.
  */
 async function getSqlPool(dbName: string) {
     if (!sqlPools[dbName]) {
@@ -30,20 +68,50 @@ async function getSqlPool(dbName: string) {
     return sqlPools[dbName];
 }
 
+
+// ===============================
+// PAYLOAD BUILDER
+// ===============================
+
 /**
- * Builds payload structure sent to SQL procedures.
+ * Request contract ko SQL procedure ke format me convert karta hai.
+ *
+ * SQL side expects:
+ * ParamObj
+ * FormObj
  */
-function buildSqlPayload(payload: any) {
+function buildSqlPayload(payload: any, action: any) {
     return {
-        ParamObj: payload?.params || {},
-        FormObj: payload?.data || {},
+        ParamObj: payload?.params || action?.params || {},
+        FormObj: payload?.data || action?.form || {},
     };
 }
 
+
+// ===============================
+// DATASET NORMALIZATION
+// ===============================
+
 /**
- * Normalizes SQL Server result into engine response format.
+ * SQL recordsets ko universal dataset me convert karta hai.
  */
-function normalizeSqlResult(result: any, meta: any): EngineResponse {
+function normalizeRecordsets(recordsets: any[]): DataSet {
+    const tables: Record<string, unknown[]> = {};
+
+    recordsets.forEach((set, index) => {
+        tables[`table${index + 1}`] = set;
+    });
+
+    return { tables };
+}
+
+
+// ===============================
+// RESULT → ENGINE RESPONSE
+// ===============================
+
+function normalizeSqlResult(result: any, meta: ResponseMeta): EngineResponse {
+
     const recordsets = Array.isArray(result?.recordsets)
         ? result.recordsets
         : Object.values(result?.recordsets || {});
@@ -51,44 +119,100 @@ function normalizeSqlResult(result: any, meta: any): EngineResponse {
     const firstRow = recordsets?.[0]?.[0] || {};
 
     return {
+        status: {
+            code: firstRow.StatusCode ?? 200,
+            success: (firstRow.StatusCode ?? 200) < 400,
+            message: firstRow.Message ?? "Success",
+        },
+
+        data: normalizeRecordsets(recordsets),
+
+        meta,
+
+        // backward compatibility
         statusCode: firstRow.StatusCode ?? 200,
         message: firstRow.Message ?? "Success",
-        data: recordsets,
+    };
+}
+
+
+// ===============================
+// ERROR → ENGINE RESPONSE
+// ===============================
+
+function mapSqlError(err: any, meta: ResponseMeta): EngineResponse {
+
+    return {
+        status: {
+            code: 500,
+            success: false,
+            message: "Database execution failed",
+        },
+
+        error: {
+            code: "SQL_EXECUTION_ERROR",
+            message: "Stored procedure execution failed",
+            details: process.env.NODE_ENV === "development" ? err?.message : undefined,
+        },
+
         meta,
     };
 }
 
+
+// ===============================
+// MAIN EXECUTOR FUNCTION
+// ===============================
+
 /**
- * Executes a SQL Server stored procedure.
+ * Stored procedure run karta hai.
+ *
+ * Steps:
+ * 1) Pool fetch
+ * 2) SQL request create
+ * 3) ParamObj/FormObj bind
+ * 4) Procedure execute
+ * 5) Result normalize
+ * 6) Error mapping
  */
 export async function runSqlProcedure(
     dbName: string,
     procedure: string,
     payload: any,
-    project: string
+    project: string,
+    action?: any
 ): Promise<EngineResponse> {
-    const pool = await getSqlPool(dbName);
-    const request = pool.request();
-
-    const { ParamObj, FormObj } = buildSqlPayload(payload);
-
-    // Send parameters EXACTLY as SQL proc expects
-    request.input("ParamObj", sql.NVarChar(sql.MAX), JSON.stringify(ParamObj));
-    request.input("FormObj", sql.NVarChar(sql.MAX), JSON.stringify(FormObj));
 
     const start = Date.now();
 
-    try {
-        const result = await request.execute(`dbo.${procedure}`);
-        const durationMs = Date.now() - start;
+    const meta: ResponseMeta = {
+        timestamp: start,
+        db: "sql",
+        procedure,
+        companyDb: dbName,
+    };
 
-        return normalizeSqlResult(result, {
-            project,
-            db: "sql",
-            durationMs,
-        });
+    try {
+        const pool = await getSqlPool(dbName);
+        const request = pool.request();
+
+        const { ParamObj, FormObj } = buildSqlPayload(payload, action);
+
+        request.input("ParamObj", sql.NVarChar(sql.MAX), JSON.stringify(ParamObj));
+        request.input("FormObj", sql.NVarChar(sql.MAX), JSON.stringify(FormObj));
+
+        const result = await request.execute(`dbo.${procedure}`);
+
+        meta.durationMs = Date.now() - start;
+
+        return normalizeSqlResult(result, meta);
+
     } catch (err: any) {
+
+        meta.durationMs = Date.now() - start;
+
         console.error("SQL EXECUTION ERROR:", err);
-        throw err;
+
+        return mapSqlError(err, meta);
     }
 }
