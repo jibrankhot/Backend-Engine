@@ -29,4 +29,13 @@ export const ENV = {
             serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",
         },
     },
+
+    /**
+     * ENGINE DB MAPPING
+     * Engine.config envKey yahan se resolve honge
+     */
+    engineDb: {
+        master: process.env.DB_MASTER_NAME || "",
+        tenantDefault: process.env.DB_TENANT_DEFAULT || "",
+    },
 };

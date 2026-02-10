@@ -1,56 +1,22 @@
 /**
  * ============================= DATABASE RESOLVER =============================
  *
- * Ye file decide karti hai:
- * - kaunsa project run ho raha hai
- * - kaunsa database hit hoga
- * - kaunsa stored procedure execute hoga
- * - payload ka final structure kya hoga
+ * FINAL PHASE-2 RESOLVER
  *
- * Backend flow:
+ * DB resolution ab:
+ * registry → engine.config → ENV.engineDb
  *
- * Client Request
- *      ↓
- * Resolver (THIS FILE)
- *      ↓
- * SQL Executor
- *      ↓
- * SQL Server
- *
- *
- * Resolver ka main kaam:
- *
- * 1) Request se procedure nikalna
- * 2) Master DB vs Tenant DB decide karna
- * 3) Login ke baad companyDb switch karna
- * 4) Payload normalize karna
- * 5) Executor ko clean context dena
- *
- *
- * RULES:
- *
- * Admin/Auth/Setup/System procedures → MASTER DB
- * Baaki sab procedures → TENANT DB (companyDb)
- *
- *
- * Example:
- *
- * AdminLoginProc → masterDb
- * GetOrdersProc → companyDb
- *
- *
- * Ye file business logic nahi likhti.
- * Sirf routing engine hai.
+ * Context se DB dependency hata di gayi hai.
+ * Engine portable ho gaya.
  *
  * =============================================================================
  */
 
 import { getContext } from "./context";
 import { EngineRequest } from "./contract/request";
-
-// Procedures jo hamesha MASTER DB se run honge
-const MASTER_PREFIX = ["Admin", "Auth", "Setup", "System"];
-
+import { getProcedureDb } from "./resolver/procedure.registry";
+import { getEngineConfig } from "../config/engine.loader";
+import { ENV } from "../config/env";
 
 export interface ResolvedContext {
     project: string;
@@ -62,48 +28,55 @@ export interface ResolvedContext {
     };
 }
 
-
 /**
  * Request ko executor-friendly format me convert karta hai.
  */
 export function resolveContext(input: EngineRequest): ResolvedContext {
 
     const cfg = getContext();
+    const engineConfig = getEngineConfig();
 
     // Project resolution
     const project = input.project || cfg.project || "default";
 
-    // Procedure resolution (new contract priority)
+    // Procedure resolution
     const procedure =
         input.action?.procedure ||
-        (input as any)?.procedure; // backward compatibility
+        (input as any)?.procedure;
 
     if (!procedure) {
         throw new Error("Procedure name is required in request");
     }
 
-
     // ===============================
-    // DATABASE DECISION LOGIC
+    // DATABASE DECISION — ENGINE DRIVEN
     // ===============================
 
     let dbName: string | undefined;
 
-    // Check if procedure belongs to master DB
-    const isMaster = MASTER_PREFIX.some(prefix =>
-        procedure.startsWith(prefix)
-    );
+    // STEP 1: registry se DB type nikalo
+    const dbType = getProcedureDb(project, procedure);
+    // MASTER | TENANT
 
-    if (isMaster) {
-        // Admin/Auth/System → setup DB
-        dbName = cfg.masterDb;
-    } else {
-        // Tenant routing
-        dbName =
-            input.auth?.companyDb || // preferred
-            cfg.clientDb;            // fallback
+    // STEP 2: engine.config se mapping nikalo
+    const mapping = engineConfig.database.mapping[dbType];
+
+    if (!mapping) {
+        throw new Error(`No DB mapping found for type: ${dbType}`);
     }
 
+    // STEP 3: ENV se actual DB name resolve karo
+    if (dbType === "MASTER") {
+        dbName = ENV.engineDb.master;
+    } else {
+        dbName =
+            input.auth?.companyDb ||        // tenant DB from login
+            ENV.engineDb.tenantDefault;     // fallback tenant DB
+    }
+
+    if (!dbName) {
+        throw new Error(`Database name not resolved for type: ${dbType}`);
+    }
 
     // ===============================
     // PAYLOAD NORMALIZATION
@@ -121,15 +94,18 @@ export function resolveContext(input: EngineRequest): ResolvedContext {
             {},
     };
 
-
     // ===============================
-    // DEV LOGGING (auto disable prod)
+    // DEV LOGGING
     // ===============================
 
     if (process.env.NODE_ENV === "development") {
-        console.log("RESOLVER → DB:", dbName, "| PROC:", procedure);
+        console.log(
+            "RESOLVER → PROJECT:", project,
+            "| DB:", dbName,
+            "| PROC:", procedure,
+            "| TYPE:", dbType
+        );
     }
-
 
     return {
         project,
