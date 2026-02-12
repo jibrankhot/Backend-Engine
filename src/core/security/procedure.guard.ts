@@ -1,28 +1,44 @@
 /**
- * This file checks whether a procedure is allowed to be executed
- * based on the project configuration.
+ * ============================================================
+ * PROCEDURE VALIDATION GUARD (FINAL ENGINE VERSION)
+ * ============================================================
+ *
+ * Purpose:
+ * - Ensure procedure exists in platform registry
+ * - Block unknown / unauthorized SQL calls
+ * - Prevent SQL execution before resolver
+ *
+ * Source of truth:
+ * platform/<project>/procedures.json
+ *
+ * Throws structured errors for global handler mapping.
+ * ============================================================
  */
 
-import { getContext } from "../context";
+import { getProcedureDb } from "../resolver/procedure.registry";
 
 /**
- * Validates if a procedure is allowed for the given project.
- * Throws an error if the procedure is not permitted.
+ * Validate procedure before execution
  */
 export function guardProcedure(project: string, procedure: string) {
-    const cfg = getContext(project);
 
-    // If no whitelist exists, allow all procedures
-    const allowed = (cfg as any).procedures?.allowed;
-
-    if (!allowed || !Array.isArray(allowed)) {
-        return true;
+    // Missing procedure
+    if (!procedure) {
+        throw {
+            type: "INVALID_REQUEST",
+            message: "Procedure name missing in request"
+        };
     }
 
-    const isAllowed = allowed.includes(procedure);
-
-    if (!isAllowed) {
-        throw new Error(`Procedure not allowed: ${procedure}`);
+    try {
+        // Validate against registry
+        getProcedureDb(project, procedure);
+    } catch (err) {
+        // Procedure not registered for this project
+        throw {
+            type: "PROCEDURE_NOT_ALLOWED",
+            message: `Procedure '${procedure}' not registered in project '${project}'`
+        };
     }
 
     return true;

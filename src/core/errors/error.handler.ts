@@ -1,36 +1,63 @@
 /**
  * ============================= GLOBAL ERROR HANDLER =============================
  *
- * Ye file backend me throw hone wale errors ko
- * structured EngineResponse me convert karta hai.
+ * Converts all thrown errors into structured EngineResponse.
+ * Supports engine-level error types:
  *
- * Purpose:
- * - server crash na ho
- * - raw SQL error frontend ko na mile
- * - standard error response mile
+ * INVALID_REQUEST → 400
+ * PROCEDURE_NOT_ALLOWED → 403
+ * SERVER_ERROR → 500
  *
- * Har route, resolver, executor isko use karega.
+ * SQL errors remain 500.
+ * ============================================================
  */
 
 import { EngineResponse } from "../contract/response";
 
-
 export function handleError(err: any): EngineResponse {
 
-    const message =
-        err?.message ||
-        "Internal Server Error";
+    let code = 500;
+    let errorCode = "SERVER_ERROR";
+    let message = "Internal Server Error";
+
+    // Engine structured errors
+    if (err?.type) {
+
+        message = err.message || message;
+
+        switch (err.type) {
+
+            case "INVALID_REQUEST":
+                code = 400;
+                errorCode = "INVALID_REQUEST";
+                break;
+
+            case "PROCEDURE_NOT_ALLOWED":
+                code = 403;
+                errorCode = "PROCEDURE_NOT_ALLOWED";
+                break;
+
+            default:
+                code = 500;
+                errorCode = "SERVER_ERROR";
+        }
+    }
+
+    // Normal JS / SQL errors
+    else if (err?.message) {
+        message = err.message;
+    }
 
     return {
         status: {
-            code: 500,
+            code,
             success: false,
-            message: message,
+            message,
         },
 
         error: {
-            code: "SERVER_ERROR",
-            message: message,
+            code: errorCode,
+            message,
             details:
                 process.env.NODE_ENV === "development"
                     ? err
@@ -41,8 +68,8 @@ export function handleError(err: any): EngineResponse {
             timestamp: Date.now(),
         },
 
-        // backward compatibility (old frontend safe)
-        statusCode: 500,
-        message: message,
+        // backward compatibility for old frontend
+        statusCode: code,
+        message,
     };
 }

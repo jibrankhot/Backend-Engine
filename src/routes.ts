@@ -1,13 +1,7 @@
-/**
- * This file defines API routes and connects HTTP requests to the engine.
- * /health = service status
- * /run = universal procedure execution endpoint
- */
-
 import { Router } from "express";
-import { runProcedure } from "./core/executor/hybrid.executor";
 import { validateRequest } from "./core/validation/validator";
 import { handleError } from "./core/errors/error.handler";
+import { run } from "./core/run";
 
 const router = Router();
 
@@ -24,16 +18,20 @@ router.get("/health", (_req, res) => {
 
 /**
  * Universal procedure executor endpoint.
+ * Flow:
+ * route → run() → guard → resolver → executor
  */
 router.post("/run", async (req, res) => {
     try {
         const body = validateRequest(req.body);
 
-        const result = await runProcedure(body);
+        // IMPORTANT: go through engine entry, not executor directly
+        const result = await run(body);
 
         res.json(result);
     } catch (err: any) {
-        res.status(500).json(handleError(err));
+        const response = handleError(err);
+        res.status(response.status.code).json(response);
     }
 });
 
