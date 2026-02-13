@@ -1,16 +1,12 @@
 /**
  * ============================================================
- * Procedure Registry Loader
+ * Procedure Registry Loader (FINAL ENGINE VERSION)
  * ============================================================
- * Hinglish Explanation:
- * Yeh file project-specific procedures.json load karti hai
- * aur batati hai kaunsa procedure kis DB me run hoga.
  *
- * Ab resolver ko hardcoded logic ki zarurat nahi padegi.
- * Sab kuch registry driven hoga.
+ * Loads project-specific procedures.json and returns DB mapping.
+ * Resolver depends on this as single source of truth.
  *
- * Flow:
- * request → project detect → procedures.json load → DB mapping return
+ * Throws structured engine errors for handler mapping.
  * ============================================================
  */
 
@@ -31,7 +27,10 @@ let cachedRegistries: Record<string, ProceduresFile> = {};
  * Load procedures.json for a project
  */
 function loadProcedures(project: string): ProceduresFile {
-    if (cachedRegistries[project]) return cachedRegistries[project];
+
+    if (cachedRegistries[project]) {
+        return cachedRegistries[project];
+    }
 
     const filePath = path.join(
         process.cwd(),
@@ -41,24 +40,35 @@ function loadProcedures(project: string): ProceduresFile {
         "procedures.json"
     );
 
-
     if (!fs.existsSync(filePath)) {
-        throw new Error(`procedures.json not found for project: ${project}`);
+        throw {
+            type: "SERVER_ERROR",
+            message: `procedures.json not found for project: ${project}`
+        };
     }
 
     const raw = fs.readFileSync(filePath, "utf-8");
 
     try {
+
         const parsed: ProceduresFile = JSON.parse(raw);
 
         if (!parsed.procedures) {
-            throw new Error("Invalid procedures.json structure");
+            throw {
+                type: "SERVER_ERROR",
+                message: "Invalid procedures.json structure"
+            };
         }
 
         cachedRegistries[project] = parsed;
         return parsed;
+
     } catch (err) {
-        throw new Error(`Invalid JSON in procedures.json for project: ${project}`);
+
+        throw {
+            type: "SERVER_ERROR",
+            message: `Invalid JSON in procedures.json for project: ${project}`
+        };
     }
 }
 
@@ -69,14 +79,16 @@ export function getProcedureDb(
     project: string,
     procedureName: string
 ): "MASTER" | "TENANT" {
+
     const registry = loadProcedures(project);
 
     const proc = registry.procedures[procedureName];
 
     if (!proc) {
-        throw new Error(
-            `Procedure '${procedureName}' not registered in project '${project}'`
-        );
+        throw {
+            type: "PROCEDURE_NOT_ALLOWED",
+            message: `Procedure '${procedureName}' not registered in project '${project}'`
+        };
     }
 
     return proc.db;

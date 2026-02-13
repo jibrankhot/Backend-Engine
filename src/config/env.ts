@@ -1,8 +1,25 @@
 import dotenv from "dotenv";
+import path from "path";
+import fs from "fs";
+
+// Load base .env first
 dotenv.config();
 
 type DbType = "sqlserver" | "supabase";
 type ProjectType = "ecom" | "school";
+
+// Detect active project
+const activeProject = (process.env.PROJECT || "ecom") as ProjectType;
+
+// Load project-specific env file
+const projectEnvPath = path.join(process.cwd(), `.env.${activeProject}`);
+
+if (fs.existsSync(projectEnvPath)) {
+    dotenv.config({ path: projectEnvPath });
+    console.log(`ENV LOADED → ${projectEnvPath}`);
+} else {
+    console.warn(`Project env not found: ${projectEnvPath}`);
+}
 
 export const ENV = {
     server: {
@@ -10,8 +27,10 @@ export const ENV = {
         port: Number(process.env.PORT || 5000),
     },
 
-    project: (process.env.PROJECT || "ecom") as ProjectType,
+    // Active project
+    project: activeProject,
 
+    // Primary DB configuration
     db: {
         primary: (process.env.DB_PRIMARY || "sqlserver") as DbType,
 
@@ -32,7 +51,7 @@ export const ENV = {
 
     /**
      * ENGINE DB MAPPING
-     * Engine.config envKey yahan se resolve honge
+     * Resolver reads from here
      */
     engineDb: {
         master: process.env.DB_MASTER_NAME || "",

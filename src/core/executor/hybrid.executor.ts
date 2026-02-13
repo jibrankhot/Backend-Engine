@@ -1,7 +1,10 @@
 /**
- * This file decides which database engine to use (SQL or Supabase),
- * validates procedure access, executes the procedure, and handles
- * auto-detection, caching, logging, and fallback.
+ * Hybrid executor decides which DB engine to use (SQL / Supabase),
+ * executes the procedure, and handles caching + logging.
+ *
+ * SECURITY NOTE:
+ * Guard is executed in run.ts.
+ * Executor should only execute.
  */
 
 import { EngineRequest } from "../contract/request";
@@ -9,7 +12,6 @@ import { EngineResponse } from "../contract/response";
 import { resolveContext } from "../resolver";
 import { runSqlProcedure } from "./sql.executor";
 import { runSupabaseProcedure } from "./supabase.executor";
-import { guardProcedure } from "../security/procedure.guard";
 import { logSuccess, logError } from "../logger/logger";
 
 // ===============================
@@ -24,45 +26,51 @@ const DB_CACHE: Record<string, "sql" | "supabase"> = {};
 export async function runProcedure(
     input: EngineRequest
 ): Promise<EngineResponse> {
+
     const start = Date.now();
 
+    // Resolve DB context
     const ctx = resolveContext(input);
     const { project, dbName, procedure, payload } = ctx;
 
-    // Security check
-    guardProcedure(project, procedure);
-
     const cachedMode = DB_CACHE[project];
 
-    // 1) Use cached DB mode
+    // 1️⃣ Use cached DB mode
     try {
+
         if (cachedMode === "sql" && dbName) {
             const res = await runSqlProcedure(dbName, procedure, payload, project);
+
             logSuccess({
                 project,
                 procedure,
                 db: "sql",
                 durationMs: Date.now() - start,
             });
+
             return res;
         }
 
         /*
         if (cachedMode === "supabase") {
             const res = await runSupabaseProcedure(procedure, payload, project);
+
             logSuccess({
                 project,
                 procedure,
                 db: "supabase",
                 durationMs: Date.now() - start,
             });
+
             return res;
         }
         */
 
-        // 2) Try SQL first
+        // 2️⃣ Try SQL first
         if (dbName) {
+
             const res = await runSqlProcedure(dbName, procedure, payload, project);
+
             DB_CACHE[project] = "sql";
 
             logSuccess({
@@ -74,14 +82,17 @@ export async function runProcedure(
 
             return res;
         }
+
     } catch (err: any) {
+
         logError({ project, procedure, db: "sql" }, err);
     }
 
-    // 3) Fallback to Supabase (TEMP DISABLED)
+    // 3️⃣ Supabase fallback (disabled for now)
     /*
     try {
         const res = await runSupabaseProcedure(procedure, payload, project);
+
         DB_CACHE[project] = "supabase";
 
         logSuccess({
@@ -98,6 +109,9 @@ export async function runProcedure(
     }
     */
 
-    // If SQL fails now → return actual SQL error
-    throw new Error("SQL execution failed and Supabase fallback is disabled.");
+    // Final failure
+    throw {
+        type: "SERVER_ERROR",
+        message: "SQL execution failed and Supabase fallback is disabled."
+    };
 }

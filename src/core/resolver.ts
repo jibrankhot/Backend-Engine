@@ -1,18 +1,16 @@
 /**
  * ============================= DATABASE RESOLVER =============================
  *
- * FINAL PHASE-2 RESOLVER
+ * FINAL ENGINE RESOLVER
  *
- * DB resolution ab:
+ * DB resolution:
  * registry → engine.config → ENV.engineDb
  *
- * Context se DB dependency hata di gayi hai.
- * Engine portable ho gaya.
- *
+ * Context DB dependency removed.
+ * Engine fully portable.
  * =============================================================================
  */
 
-import { getContext } from "./context";
 import { EngineRequest } from "./contract/request";
 import { getProcedureDb } from "./resolver/procedure.registry";
 import { getEngineConfig } from "../config/engine.loader";
@@ -29,15 +27,14 @@ export interface ResolvedContext {
 }
 
 /**
- * Request ko executor-friendly format me convert karta hai.
+ * Convert request into executor-friendly context
  */
 export function resolveContext(input: EngineRequest): ResolvedContext {
 
-    const cfg = getContext();
     const engineConfig = getEngineConfig();
 
     // Project resolution
-    const project = input.project || cfg.project || "default";
+    const project = input.project || ENV.project;
 
     // Procedure resolution
     const procedure =
@@ -45,7 +42,10 @@ export function resolveContext(input: EngineRequest): ResolvedContext {
         (input as any)?.procedure;
 
     if (!procedure) {
-        throw new Error("Procedure name is required in request");
+        throw {
+            type: "INVALID_REQUEST",
+            message: "Procedure name is required in request"
+        };
     }
 
     // ===============================
@@ -54,28 +54,34 @@ export function resolveContext(input: EngineRequest): ResolvedContext {
 
     let dbName: string | undefined;
 
-    // STEP 1: registry se DB type nikalo
+    // STEP 1: Get DB type from registry
     const dbType = getProcedureDb(project, procedure);
     // MASTER | TENANT
 
-    // STEP 2: engine.config se mapping nikalo
+    // STEP 2: Get DB mapping from engine config
     const mapping = engineConfig.database.mapping[dbType];
 
     if (!mapping) {
-        throw new Error(`No DB mapping found for type: ${dbType}`);
+        throw {
+            type: "SERVER_ERROR",
+            message: `No DB mapping found for type: ${dbType}`
+        };
     }
 
-    // STEP 3: ENV se actual DB name resolve karo
+    // STEP 3: Resolve actual DB name from ENV
     if (dbType === "MASTER") {
         dbName = ENV.engineDb.master;
     } else {
         dbName =
-            input.auth?.companyDb ||        // tenant DB from login
-            ENV.engineDb.tenantDefault;     // fallback tenant DB
+            input.auth?.companyDb ||
+            ENV.engineDb.tenantDefault;
     }
 
     if (!dbName) {
-        throw new Error(`Database name not resolved for type: ${dbType}`);
+        throw {
+            type: "SERVER_ERROR",
+            message: `Database name not resolved for type: ${dbType}`
+        };
     }
 
     // ===============================
