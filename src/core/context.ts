@@ -42,6 +42,8 @@
 import fs from "fs";
 import path from "path";
 import { ENV } from "../config/env";
+import { v4 as uuid } from "uuid";
+
 
 
 export type ProjectConfig = {
@@ -117,4 +119,42 @@ export function getContext(projectName?: string): ProjectConfig {
     }
 
     return cache[project];
+
 }
+
+
+// ===============================
+// EXECUTION CONTEXT (PHASE-3)
+// ===============================
+
+/**
+ * Runtime execution context.
+ * This travels across resolver → executor → DB → response.
+ * Used for:
+ * - logging
+ * - tracing
+ * - performance measurement
+ */
+export type ExecutionContext = {
+    requestId: string;
+    startTime: number;
+    engine?: "sql" | "supabase";
+    project?: string;
+    tenant?: string;
+};
+
+
+/**
+ * Creates per-request execution context.
+ * Does NOT affect project config resolver.
+ */
+export function createExecutionContext(req?: any): ExecutionContext {
+    return {
+        requestId: uuid(),
+        startTime: Date.now(),
+        project: req?.headers?.["x-project"],
+        tenant: req?.headers?.["x-tenant"],
+        engine: undefined,
+    };
+}
+
