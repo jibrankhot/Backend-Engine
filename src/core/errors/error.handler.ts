@@ -13,8 +13,11 @@
  */
 
 import { EngineResponse } from "../contract/response";
+import { logger } from "../logger/logger";
 
-export function handleError(err: any): EngineResponse {
+export function handleError(err: any, request?: any): EngineResponse {
+
+    const ctx = request?.__ctx;
 
     let code = 500;
     let errorCode = "SERVER_ERROR";
@@ -48,6 +51,15 @@ export function handleError(err: any): EngineResponse {
         message = err.message;
     }
 
+    // 🔴 STRUCTURED ERROR LOG
+    logger.error({
+        requestId: ctx?.requestId,
+        engine: ctx?.engine,
+        action: "ENGINE_ERROR_HANDLER",
+        message,
+        meta: err,
+    });
+
     return {
         status: {
             code,
@@ -68,7 +80,6 @@ export function handleError(err: any): EngineResponse {
             timestamp: Date.now(),
         },
 
-        // backward compatibility for old frontend
         statusCode: code,
         message,
     };

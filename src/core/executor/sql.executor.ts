@@ -1,41 +1,8 @@
 /**
  * ============================= SQL EXECUTOR (CORE ENGINE) =============================
  *
- * Ye backend engine ka SABSE IMPORTANT file hai.
- * Yahin se actual database execution hota hai.
- *
- * Backend flow samjho:
- *
- * Angular / Client
- *        ↓
- * API Route (/api/run)
- *        ↓
- * DB Resolver (decides DB)
- *        ↓
- * SQL Executor (THIS FILE)
- *        ↓
- * Stored Procedure (SQL Server)
- *        ↓
- * Response normalize karke client ko wapas
- *
- *
- * Ye file kya handle karti hai:
- *
- * 1) SQL connection pooling (per database)
- * 2) Stored procedure execution
- * 3) ParamObj / FormObj SQL ko bhejna
- * 4) SQL recordsets ko normalize karna
- * 5) Execution time measure karna
- * 6) SQL errors ko safe response me convert karna
- * 7) Universal response contract follow karna
- *
- *
- * IMPORTANT:
- * - Yahan koi business logic nahi hota
- * - Sirf transport + execution layer hai
- * - Reusable across ALL projects
- *
- * Agar ye file strong hai → poora backend reusable engine ban jata hai.
+ * Production-grade SQL execution layer with structured logging + intelligent error mapping.
+ * Hybrid-safe: debug in logs, safe response to client.
  *
  * =============================================================================
  */
@@ -43,6 +10,8 @@
 import sql from "mssql";
 import { SQL_CONFIG } from "../../config/db";
 import { EngineResponse, ResponseMeta, DataSet } from "../contract/response";
+import { logger } from "../logger/logger";
+import { SQL_ERROR_MAP } from "../errors/sql.error.codes";
 
 
 // ===============================
@@ -51,10 +20,6 @@ import { EngineResponse, ResponseMeta, DataSet } from "../contract/response";
 
 const sqlPools: Record<string, sql.ConnectionPool> = {};
 
-/**
- * Har database ke liye ek hi connection pool banega.
- * Performance improve hoti hai.
- */
 async function getSqlPool(dbName: string) {
     if (!sqlPools[dbName]) {
         const pool = new sql.ConnectionPool({
@@ -73,13 +38,6 @@ async function getSqlPool(dbName: string) {
 // PAYLOAD BUILDER
 // ===============================
 
-/**
- * Request contract ko SQL procedure ke format me convert karta hai.
- *
- * SQL side expects:
- * ParamObj
- * FormObj
- */
 function buildSqlPayload(payload: any, action: any) {
     return {
         ParamObj: payload?.params || action?.params || {},
@@ -92,9 +50,6 @@ function buildSqlPayload(payload: any, action: any) {
 // DATASET NORMALIZATION
 // ===============================
 
-/**
- * SQL recordsets ko universal dataset me convert karta hai.
- */
 function normalizeRecordsets(recordsets: any[]): DataSet {
     const tables: Record<string, unknown[]> = {};
 
@@ -129,7 +84,6 @@ function normalizeSqlResult(result: any, meta: ResponseMeta): EngineResponse {
 
         meta,
 
-        // backward compatibility
         statusCode: firstRow.StatusCode ?? 200,
         message: firstRow.Message ?? "Success",
     };
@@ -137,22 +91,38 @@ function normalizeSqlResult(result: any, meta: ResponseMeta): EngineResponse {
 
 
 // ===============================
-// ERROR → ENGINE RESPONSE
+// INTELLIGENT SQL ERROR MAPPER
 // ===============================
 
 function mapSqlError(err: any, meta: ResponseMeta): EngineResponse {
+
+    const sqlNumber =
+        err?.number ||
+        err?.originalError?.info?.number;
+
+    const mapped = SQL_ERROR_MAP[sqlNumber];
+
+    const errorCode = mapped?.code || "SQL_EXECUTION_ERROR";
+
+    const userMessage =
+        mapped?.userMessage ||
+        "Something went wrong while processing your request.";
+
+    const retryable = mapped?.retryable ?? false;
 
     return {
         status: {
             code: 500,
             success: false,
-            message: "Database execution failed",
+            message: userMessage,
         },
 
         error: {
-            code: "SQL_EXECUTION_ERROR",
-            message: "Stored procedure execution failed",
-            details: process.env.NODE_ENV === "development" ? err?.message : undefined,
+            code: errorCode,
+            engine: "sql",
+            retryable,
+            type: mapped?.type || "SYSTEM",
+            message: userMessage,
         },
 
         meta,
@@ -164,26 +134,18 @@ function mapSqlError(err: any, meta: ResponseMeta): EngineResponse {
 // MAIN EXECUTOR FUNCTION
 // ===============================
 
-/**
- * Stored procedure run karta hai.
- *
- * Steps:
- * 1) Pool fetch
- * 2) SQL request create
- * 3) ParamObj/FormObj bind
- * 4) Procedure execute
- * 5) Result normalize
- * 6) Error mapping
- */
 export async function runSqlProcedure(
     dbName: string,
     procedure: string,
     payload: any,
     project: string,
-    action?: any
+    action?: any,
+    request?: any
 ): Promise<EngineResponse> {
 
     const start = Date.now();
+
+    const ctx = request?.__ctx;
 
     const meta: ResponseMeta = {
         timestamp: start,
@@ -192,18 +154,39 @@ export async function runSqlProcedure(
         companyDb: dbName,
     };
 
+    // SQL START LOG
+    logger.sql({
+        requestId: ctx?.requestId,
+        action: "SQL_EXECUTION_START",
+        message: "Executing stored procedure",
+        project,
+        procedure,
+        db: dbName,
+    });
+
     try {
         const pool = await getSqlPool(dbName);
-        const request = pool.request();
+        const sqlRequest = pool.request();
 
         const { ParamObj, FormObj } = buildSqlPayload(payload, action);
 
-        request.input("ParamObj", sql.NVarChar(sql.MAX), JSON.stringify(ParamObj));
-        request.input("FormObj", sql.NVarChar(sql.MAX), JSON.stringify(FormObj));
+        sqlRequest.input("ParamObj", sql.NVarChar(sql.MAX), JSON.stringify(ParamObj));
+        sqlRequest.input("FormObj", sql.NVarChar(sql.MAX), JSON.stringify(FormObj));
 
-        const result = await request.execute(`dbo.${procedure}`);
+        const result = await sqlRequest.execute(`dbo.${procedure}`);
 
         meta.durationMs = Date.now() - start;
+
+        // SQL SUCCESS LOG
+        logger.sql({
+            requestId: ctx?.requestId,
+            action: "SQL_EXECUTION_SUCCESS",
+            message: "Stored procedure executed successfully",
+            durationMs: meta.durationMs,
+            project,
+            procedure,
+            db: dbName,
+        });
 
         return normalizeSqlResult(result, meta);
 
@@ -211,7 +194,17 @@ export async function runSqlProcedure(
 
         meta.durationMs = Date.now() - start;
 
-        console.error("SQL EXECUTION ERROR:", err);
+        // 🔴 FULL DEBUG IN LOGS ONLY
+        logger.error({
+            requestId: ctx?.requestId,
+            engine: "sql",
+            action: "SQL_EXECUTION_ERROR",
+            message: err?.message || "SQL execution failure",
+            project,
+            procedure,
+            db: dbName,
+            meta: err,
+        });
 
         return mapSqlError(err, meta);
     }

@@ -12,13 +12,14 @@ import { EngineResponse } from "../contract/response";
 import { resolveContext } from "../resolver";
 import { runSqlProcedure } from "./sql.executor";
 import { runSupabaseProcedure } from "./supabase.executor";
-import { logSuccess, logError } from "../logger/logger";
+import { logger } from "../logger/logger";
 
 // ===============================
 // DB MODE CACHE (per project)
 // ===============================
 
 const DB_CACHE: Record<string, "sql" | "supabase"> = {};
+
 
 /**
  * Executes a procedure using the hybrid database engine.
@@ -29,37 +30,64 @@ export async function runProcedure(
 
     const start = Date.now();
 
+    // Execution context from run.ts
+    const execCtx = (input as any).__ctx;
+
     // Resolve DB context
     const ctx = resolveContext(input);
     const { project, dbName, procedure, payload } = ctx;
 
     const cachedMode = DB_CACHE[project];
 
-    // 1️⃣ Use cached DB mode
     try {
 
+        // 1️⃣ Use cached SQL mode
         if (cachedMode === "sql" && dbName) {
-            const res = await runSqlProcedure(dbName, procedure, payload, project);
 
-            logSuccess({
+            execCtx.engine = "sql";
+
+            const res = await runSqlProcedure(
+                dbName,
+                procedure,
+                payload,
+                project,
+                input.action,
+                input
+            );
+
+            logger.sql({
+                requestId: execCtx?.requestId,
+                action: "HYBRID_SQL_CACHED",
+                message: "SQL execution via cached engine",
+                durationMs: Date.now() - start,
                 project,
                 procedure,
-                db: "sql",
-                durationMs: Date.now() - start,
+                db: dbName,
             });
 
             return res;
         }
 
         /*
+        // SUPABASE CACHED MODE (future enable)
         if (cachedMode === "supabase") {
-            const res = await runSupabaseProcedure(procedure, payload, project);
 
-            logSuccess({
+            execCtx.engine = "supabase";
+
+            const res = await runSupabaseProcedure(
+                procedure,
+                payload,
+                project,
+                input
+            );
+
+            logger.supabase({
+                requestId: execCtx?.requestId,
+                action: "HYBRID_SUPABASE_CACHED",
+                message: "Supabase execution via cached engine",
+                durationMs: Date.now() - start,
                 project,
                 procedure,
-                db: "supabase",
-                durationMs: Date.now() - start,
             });
 
             return res;
@@ -69,15 +97,27 @@ export async function runProcedure(
         // 2️⃣ Try SQL first
         if (dbName) {
 
-            const res = await runSqlProcedure(dbName, procedure, payload, project);
+            execCtx.engine = "sql";
+
+            const res = await runSqlProcedure(
+                dbName,
+                procedure,
+                payload,
+                project,
+                input.action,
+                input
+            );
 
             DB_CACHE[project] = "sql";
 
-            logSuccess({
+            logger.sql({
+                requestId: execCtx?.requestId,
+                action: "HYBRID_SQL_SELECTED",
+                message: "SQL selected as execution engine",
+                durationMs: Date.now() - start,
                 project,
                 procedure,
-                db: "sql",
-                durationMs: Date.now() - start,
+                db: dbName,
             });
 
             return res;
@@ -85,26 +125,56 @@ export async function runProcedure(
 
     } catch (err: any) {
 
-        logError({ project, procedure, db: "sql" }, err);
+        logger.error({
+            requestId: execCtx?.requestId,
+            engine: "sql",
+            action: "HYBRID_SQL_FAILURE",
+            message: err?.message || "SQL execution failed",
+            project,
+            procedure,
+            db: dbName,
+            meta: err,
+        });
     }
 
     // 3️⃣ Supabase fallback (disabled for now)
     /*
     try {
-        const res = await runSupabaseProcedure(procedure, payload, project);
+
+        execCtx.engine = "supabase";
+
+        const res = await runSupabaseProcedure(
+            procedure,
+            payload,
+            project,
+            input
+        );
 
         DB_CACHE[project] = "supabase";
 
-        logSuccess({
+        logger.supabase({
+            requestId: execCtx?.requestId,
+            action: "HYBRID_SUPABASE_SELECTED",
+            message: "Supabase selected as execution engine",
+            durationMs: Date.now() - start,
             project,
             procedure,
-            db: "supabase",
-            durationMs: Date.now() - start,
         });
 
         return res;
+
     } catch (err: any) {
-        logError({ project, procedure, db: "supabase" }, err);
+
+        logger.error({
+            requestId: execCtx?.requestId,
+            engine: "supabase",
+            action: "HYBRID_SUPABASE_FAILURE",
+            message: err?.message || "Supabase execution failed",
+            project,
+            procedure,
+            meta: err,
+        });
+
         throw err;
     }
     */
