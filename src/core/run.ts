@@ -15,6 +15,21 @@ export async function run(request: EngineRequest) {
     // Create execution context (Phase-3)
     const ctx = createExecutionContext();
 
+    /**
+     * Inject auth into execution context
+     * Provided by auth.middleware via routes.ts
+     */
+    const auth = (request as any).__auth;
+    const token = (request as any).__token;
+
+    if (auth) {
+        (ctx as any).auth = auth;
+    }
+
+    if (token) {
+        (ctx as any).token = token;
+    }
+
     try {
 
         // Resolve project

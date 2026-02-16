@@ -96,13 +96,16 @@ function normalizeSqlResult(result: any, meta: ResponseMeta): EngineResponse {
 
 function mapSqlError(err: any, meta: ResponseMeta): EngineResponse {
 
-    const sqlNumber =
-        err?.number ||
+    const sqlNumber: number | string | undefined =
+        err?.number ??
         err?.originalError?.info?.number;
 
-    const mapped = SQL_ERROR_MAP[sqlNumber];
+    const mapped =
+        sqlNumber !== undefined
+            ? SQL_ERROR_MAP[String(sqlNumber)]
+            : undefined;
 
-    const errorCode = mapped?.code || "SQL_EXECUTION_ERROR";
+    const errorCode = mapped?.code || "E_SQL_EXECUTION_ERROR";
 
     const userMessage =
         mapped?.userMessage ||
@@ -128,6 +131,8 @@ function mapSqlError(err: any, meta: ResponseMeta): EngineResponse {
         meta,
     };
 }
+
+
 
 
 // ===============================

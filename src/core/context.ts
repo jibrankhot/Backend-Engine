@@ -2,39 +2,7 @@
  * ============================= PROJECT CONTEXT LOADER =============================
  *
  * Ye file backend engine ka configuration brain hai.
- *
- * Resolver aur executor yahin se jaankar lete hain:
- * - project ka naam
- * - master database
- * - client/tenant database
- *
- * Flow:
- *
- * Request → Resolver → getContext() → config.json read → DB decide
- *
- *
- * Ye kya karta hai:
- *
- * 1) /projects/{project}/config.json load karta hai
- * 2) masterDb & clientDb deta hai resolver ko
- * 3) cache maintain karta hai (baar-baar file read nahi hoti)
- * 4) multi-project support deta hai
- *
- *
- * Example config.json:
- *
- * {
- *   "project": "ecom",
- *   "masterDb": "EcomSetup",
- *   "clientDb": "ClientA_DB"
- * }
- *
- *
- * IMPORTANT:
- * Ye file business logic nahi rakhti.
- * Sirf configuration resolution karti hai.
- *
- * Agar ye strong hai → engine easily multi-project ban jata hai.
+ * Resolver aur executor yahin se DB context lete hain.
  *
  * =============================================================================
  */
@@ -43,8 +11,7 @@ import fs from "fs";
 import path from "path";
 import { ENV } from "../config/env";
 import { v4 as uuid } from "uuid";
-
-
+import { AuthContext } from "./auth/auth.types";
 
 export type ProjectConfig = {
     project: string;
@@ -57,10 +24,6 @@ export type ProjectConfig = {
 // CONFIG CACHE
 // ===============================
 
-/**
- * Har project ka config memory me store hota hai.
- * Performance improve hoti hai.
- */
 const cache: Record<string, ProjectConfig> = {};
 
 
@@ -68,9 +31,6 @@ const cache: Record<string, ProjectConfig> = {};
 // CONFIG FILE PATH RESOLUTION
 // ===============================
 
-/**
- * src aur dist dono environments support karta hai.
- */
 function getProjectConfigPath(project: string) {
 
     const baseDir = process.cwd();
@@ -92,9 +52,6 @@ function getProjectConfigPath(project: string) {
 // MAIN CONTEXT FUNCTION
 // ===============================
 
-/**
- * Resolver yahin se DB configuration leta hai.
- */
 export function getContext(projectName?: string): ProjectConfig {
 
     const project = projectName || ENV.project;
@@ -103,7 +60,6 @@ export function getContext(projectName?: string): ProjectConfig {
         throw new Error("Project name missing in ENV and request");
     }
 
-    // cache check
     if (!cache[project]) {
 
         const filePath = getProjectConfigPath(project);
@@ -119,7 +75,6 @@ export function getContext(projectName?: string): ProjectConfig {
     }
 
     return cache[project];
-
 }
 
 
@@ -129,11 +84,8 @@ export function getContext(projectName?: string): ProjectConfig {
 
 /**
  * Runtime execution context.
- * This travels across resolver → executor → DB → response.
- * Used for:
- * - logging
- * - tracing
- * - performance measurement
+ * Travels across:
+ * resolver → executor → DB → response
  */
 export type ExecutionContext = {
     requestId: string;
@@ -141,12 +93,17 @@ export type ExecutionContext = {
     engine?: "sql" | "supabase";
     project?: string;
     tenant?: string;
+
+    /**
+     * AUTH INTEGRATION (Phase-3 Step-3)
+     */
+    auth?: AuthContext;
+    token?: string;
 };
 
 
 /**
  * Creates per-request execution context.
- * Does NOT affect project config resolver.
  */
 export function createExecutionContext(req?: any): ExecutionContext {
     return {
@@ -155,6 +112,7 @@ export function createExecutionContext(req?: any): ExecutionContext {
         project: req?.headers?.["x-project"],
         tenant: req?.headers?.["x-tenant"],
         engine: undefined,
+        auth: undefined,
+        token: undefined,
     };
 }
-

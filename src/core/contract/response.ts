@@ -43,8 +43,20 @@ export interface ResponseStatus {
 export interface ResponseError {
     code: string;
     message: string;
+
+    /**
+     * Phase-3 engine intelligence fields
+     */
+    engine?: "sql" | "supabase" | "api";
+    retryable?: boolean;
+    type?: "SYSTEM" | "DATA" | "SECURITY" | "AUTH";
+
+    /**
+     * Debug / internal
+     */
     details?: unknown;
 }
+
 
 
 /* -------------------------------------------------------------------------- */
